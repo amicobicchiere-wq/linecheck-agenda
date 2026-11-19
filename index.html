@@ -130,6 +130,11 @@ h2 small{font-family:var(--font-body);font-size:14px;font-weight:700;color:var(-
 .mode:empty{display:none}
 .ev.wait{border-left-color:var(--muted);border-left-style:dotted}
 .tel{align-self:flex-start;font-weight:700;font-size:15px;color:var(--accent-dark);text-decoration:none;border-bottom:2px solid var(--accent-soft)}
+.addbtn{font:inherit;font-weight:700;font-size:16px;width:100%;padding:12px;border-radius:14px;border:2px dashed var(--accent);background:var(--surface);color:var(--accent-dark);cursor:pointer}
+.addbtn:hover{background:var(--accent-soft)}
+.addform{margin-top:0;border:2px solid var(--accent)}
+.tin{font:inherit;font-size:16px;font-weight:600;width:100%;padding:9px 12px;border:2px solid var(--line);border-radius:10px;background:#fff;color:var(--title)}
+.btn.del{border-color:var(--past);color:var(--past);margin-left:auto}
 </style>
 </head>
 <body>
@@ -162,6 +167,7 @@ let STATE = JSON.parse(JSON.stringify(EMBED));
 let MODE = "loading";            // "shared" (claude.ai) | "local" (GitHub/altro) | "readonly"
 let artifactApi = null, dict = null, publishTimer = null, publishing = false;
 const openEdit = new Set(), openNote = new Set(), editDay = {};
+let addOpen = false, addDay = 20, armDel = null;
 
 function loadLocal(){
   let saved = null;
@@ -214,13 +220,14 @@ function cardHTML(e, now){
                        : `<button class="t tbd" type="button" data-edit="${e.id}" ${dis}>+ orario</button>`;
   const owner = !e.day && (e.who||[]).length ? `<div class="who"><span class="chip fixed">→ ${esc(e.who.join(", "))}</span></div>` : "";
   const phone = e.phone ? `<a class="tel" href="tel:+39${e.phone.replace(/\D/g,"")}">${esc(e.phone.replace(/^(\d{3})(\d{3})(\d+)$/,"$1 $2 $3"))}</a>` : "";
-  const selDay = editDay[e.id] ?? e.day;
+  const selDay = editDay[e.id] ?? (e.day||"wait");
   const who = e.day===20 ? `<div class="who">${PEOPLE[20].map(p=>`<button type="button" class="chip ${(e.who||[]).includes(p)?"on":""}" data-who="${p}" data-id="${e.id}" aria-pressed="${(e.who||[]).includes(p)}" ${dis}>${p}</button>`).join("")}${(e.who||[]).length?"":`<span class="missing">chi va?</span>`}</div>` : "";
   const edit = openEdit.has(e.id) ? `<form class="edit" data-form="${e.id}">
-      <div class="seg" role="group" aria-label="Giorno">${[19,20].map(d=>`<button type="button" class="segb ${selDay===d?"on":""}" data-setday="${d}" data-id="${e.id}">${d===19?"Gio 19":"Ven 20"}</button>`).join("")}</div>
+      <div class="seg" role="group" aria-label="Giorno">${[19,20,"wait"].map(d=>`<button type="button" class="segb ${selDay===d?"on":""}" data-setday="${d}" data-id="${e.id}">${d===19?"Gio 19":d===20?"Ven 20":"In attesa"}</button>`).join("")}</div>
+      <input class="tin" type="text" id="nm-${e.id}" value="${esc(e.name)}" aria-label="Nome">
       <label>Dalle <input type="time" id="s-${e.id}" value="${e.start||""}" step="300"></label>
       <label>Alle <input type="time" id="e-${e.id}" value="${e.end||""}" step="300"></label>
-      <div class="erow"><button class="btn solid" type="submit">Salva</button><button class="btn" type="button" data-clear="${e.id}">Senza orario</button><button class="btn ghost" type="button" data-edit="${e.id}">Annulla</button></div>
+      <div class="erow"><button class="btn solid" type="submit">Salva</button><button class="btn" type="button" data-clear="${e.id}">Senza orario</button><button class="btn ghost" type="button" data-edit="${e.id}">Annulla</button><button class="btn del" type="button" data-del="${e.id}">${armDel===e.id?"Conferma elimina":"Elimina"}</button></div>
     </form>` : "";
   const draft = getDraft(e.id);
   const noteOpen = e.done || openNote.has(e.id);
@@ -263,6 +270,7 @@ function shell(){
   <a class="cta" href="${FORM_URL}" target="_blank" rel="noopener"><span class="plus" aria-hidden="true">+</span><span>Nuovo contatto</span></a>
   <div class="banner" id="banner" role="status"></div>
   <section class="now" id="now" aria-live="polite"><div class="lbl" id="nowLbl">Prossimo</div><div class="what" id="nowWhat">–</div><div class="when" id="nowWhen">–</div></section>
+  <div id="add"></div>
   <section><h2>Giovedì 19 <small>va Ricky</small></h2><div class="list" id="day-19"></div></section>
   <section><h2>Venerdì 20 <small>Otto · Ricky · Marti</small></h2><div class="list" id="day-20"></div></section>
   <section><h2>In attesa <small>di riscontro</small></h2><div class="list" id="day-wait"></div></section>
@@ -274,8 +282,9 @@ function render(){
   const now = new Date();
   // non ridisegnare mentre si scrive una nota
   const a = document.activeElement;
-  if(a && (a.tagName==="TEXTAREA" || (a.tagName==="INPUT" && a.type==="time"))){ renderNow(now); return; }
+  if(a && (a.tagName==="TEXTAREA" || a.tagName==="INPUT")){ renderNow(now); return; }
   [19,20].forEach(d=>{ document.getElementById("day-"+d).innerHTML = dayHTML(d, now); });
+  document.getElementById("add").innerHTML = addHTML();
   document.getElementById("day-wait").innerHTML = STATE.events.filter(e=>!e.day).map(e=>cardHTML(e,now)).join("");
   renderNow(now);
   document.getElementById("mode").textContent = MODE==="local" ? "Modifiche salvate solo su questo telefono." : MODE==="readonly" ? "Solo lettura." : "";
@@ -331,13 +340,25 @@ document.addEventListener("click", evt=>{
   if(d.done){ const e=ev(d.done); e.done=!e.done; commit(); return; }
   if(d.who){ const e=ev(d.id); const s=new Set(e.who||[]); s.has(d.who)?s.delete(d.who):s.add(d.who); e.who=PEOPLE[20].filter(p=>s.has(p)); commit(); return; }
   if(d.edit){ openEdit.has(d.edit)?openEdit.delete(d.edit):openEdit.add(d.edit); render(); return; }
-  if(d.setday){ editDay[d.id]=+d.setday; render(); return; }
+  if(d.setday){ editDay[d.id]= d.setday==="wait" ? "wait" : +d.setday; render(); return; }
+  if(d.del){ if(armDel!==d.del){ armDel=d.del; render(); return; } STATE.events=STATE.events.filter(x=>x.id!==d.del); armDel=null; openEdit.delete(d.del); commit(); return; }
+  if(d.add){ addOpen=!addOpen; render(); if(addOpen){ const n=document.getElementById("add-name"); if(n) n.focus(); } return; }
+  if(d.addday){ addDay = d.addday==="wait" ? "wait" : +d.addday; const keep=collectAdd(); render(); restoreAdd(keep); return; }
   if(d.clear){ const e=ev(d.clear); if(!applyDay(e)) return; e.start=null; e.end=null; openEdit.delete(e.id); commit(); return; }
   if(d.opennote){ openNote.add(d.opennote); render(); const ta=document.getElementById("n-"+d.opennote); if(ta) ta.focus(); return; }
   if(d.savenote){ saveNote(d.savenote); return; }
   if(d.mic){ toggleMic(d.mic, t); return; }
 });
 document.addEventListener("submit", evt=>{
+  if(evt.target.id==="addForm"){
+    evt.preventDefault();
+    const [name,s,en,note] = collectAdd();
+    if(!name.trim()){ setBanner("Scrivi chi o cosa."); return; }
+    if(en && s && en<=s){ setBanner("L'orario di fine deve essere dopo l'inizio."); return; }
+    const day = addDay==="wait" ? null : addDay;
+    STATE.events.push({id:"m"+Date.now().toString(36), name:name.trim(), day, start: day&&s?s:null, end: day&&s&&en?en:null, type:"", note:note.trim(), who:[], done:false, notes:"", phone:""});
+    addOpen=false; setBanner(""); document.activeElement && document.activeElement.blur(); commit(); return;
+  }
   const f = evt.target.closest("[data-form]"); if(!f) return;
   evt.preventDefault();
   const e = ev(f.dataset.form);
@@ -351,10 +372,26 @@ document.addEventListener("input", evt=>{
   const ta = evt.target.closest("[data-note]"); if(ta) setDraft(ta.dataset.note, ta.value);
 });
 function applyDay(e){
-  const d = editDay[e.id] ?? e.day;
-  if(!d){ setBanner("Scegli prima il giorno (Gio o Ven)."); return false; }
-  if(d!==e.day){ e.day=d; if(d===19) e.who=[]; }
+  const d = editDay[e.id] ?? (e.day||"wait");
+  const nm = document.getElementById("nm-"+e.id);
+  if(nm && nm.value.trim()) e.name = nm.value.trim();
+  if(d==="wait"){ e.day=null; e.start=null; e.end=null; }
+  else if(d!==e.day){ e.day=d; if(d===19) e.who=[]; }
   delete editDay[e.id]; return true;
+}
+function collectAdd(){ return ["add-name","add-s","add-e","add-note"].map(id=>{ const x=document.getElementById(id); return x?x.value:""; }); }
+function restoreAdd(v){ ["add-name","add-s","add-e","add-note"].forEach((id,i)=>{ const x=document.getElementById(id); if(x) x.value=v[i]||""; }); }
+function addHTML(){
+  if(!canEdit()) return "";
+  if(!addOpen) return `<button class="addbtn" type="button" data-add="1">+ Aggiungi appuntamento</button>`;
+  const wait = addDay==="wait";
+  return `<form class="edit addform" id="addForm">
+    <input class="tin" type="text" id="add-name" placeholder="Chi / cosa" required>
+    <div class="seg" role="group" aria-label="Giorno">${[19,20,"wait"].map(d=>`<button type="button" class="segb ${addDay===d?"on":""}" data-addday="${d}">${d===19?"Gio 19":d===20?"Ven 20":"In attesa"}</button>`).join("")}</div>
+    ${wait?"":`<label>Dalle <input type="time" id="add-s" step="300"></label><label>Alle <input type="time" id="add-e" step="300"></label>`}
+    <input class="tin" type="text" id="add-note" placeholder="Nota (facoltativa)">
+    <div class="erow"><button class="btn solid" type="submit">Aggiungi</button><button class="btn ghost" type="button" data-add="1">Annulla</button></div>
+  </form>`;
 }
 function saveNote(id){
   const ta = document.getElementById("n-"+id); if(!ta) return;
