@@ -130,6 +130,7 @@ h2 small{font-family:var(--font-body);font-size:14px;font-weight:700;color:var(-
 .mode:empty{display:none}
 .ev.wait{border-left-color:var(--muted);border-left-style:dotted}
 .tel{align-self:flex-start;font-weight:700;font-size:15px;color:var(--accent-dark);text-decoration:none;border-bottom:2px solid var(--accent-soft)}
+.export{white-space:pre-wrap;font-size:13px;background:#fff;border:2px solid var(--line);border-radius:12px;padding:12px;user-select:text;-webkit-user-select:text}
 .addbtn{font:inherit;font-weight:700;font-size:16px;width:100%;padding:12px;border-radius:14px;border:2px dashed var(--accent);background:var(--surface);color:var(--accent-dark);cursor:pointer}
 .addbtn:hover{background:var(--accent-soft)}
 .addform{margin-top:0;border:2px solid var(--accent)}
@@ -274,7 +275,9 @@ function shell(){
   <section><h2>Giovedì 19 <small>va Ricky</small></h2><div class="list" id="day-19"></div></section>
   <section><h2>Venerdì 20 <small>Otto · Ricky · Marti</small></h2><div class="list" id="day-20"></div></section>
   <section><h2>In attesa <small>di riscontro</small></h2><div class="list" id="day-wait"></div></section>
+  <button class="addbtn" type="button" data-copyall="1">Copia tutte le note</button>
   <div class="mode" id="mode"></div>
+  <pre id="exportBox" class="export" hidden></pre>
 </div>`);
 }
 
@@ -348,6 +351,7 @@ document.addEventListener("click", evt=>{
   if(d.opennote){ openNote.add(d.opennote); render(); const ta=document.getElementById("n-"+d.opennote); if(ta) ta.focus(); return; }
   if(d.savenote){ saveNote(d.savenote); return; }
   if(d.mic){ toggleMic(d.mic, t); return; }
+  if(d.copyall){ copyAll(t); return; }
 });
 document.addEventListener("submit", evt=>{
   if(evt.target.id==="addForm"){
@@ -392,6 +396,25 @@ function addHTML(){
     <input class="tin" type="text" id="add-note" placeholder="Nota (facoltativa)">
     <div class="erow"><button class="btn solid" type="submit">Aggiungi</button><button class="btn ghost" type="button" data-add="1">Annulla</button></div>
   </form>`;
+}
+function exportText(){
+  const order = e => (e.day||99)*10000 + (e.start ? +e.start.replace(":","") : 9999);
+  const list = [...STATE.events].sort((a,b)=>order(a)-order(b));
+  const out = ["AGENDA LINECHECK – note ("+new Date().toLocaleString("it-IT",{timeZone:"Europe/Rome"})+")",""];
+  list.forEach(e=>{
+    const draft = getDraft(e.id);
+    const notes = (draft!=null ? draft : e.notes||"").trim();
+    if(!notes && !e.done) return;
+    const when = !e.day ? "In attesa" : (e.day===19?"Gio":"Ven")+(e.start?" "+e.start:" (senza orario)");
+    out.push("• "+e.name+" — "+when+(e.done?" — FATTO":"")+(whoOf(e).length?" — "+whoOf(e).join(", "):""));
+    if(notes) out.push("  "+notes.replace(/\n/g,"\n  "));
+  });
+  return out.join("\n");
+}
+async function copyAll(btn){
+  const txt = exportText();
+  try{ await navigator.clipboard.writeText(txt); btn.textContent="✓ Copiate: incollale in chat"; setTimeout(()=>{btn.textContent="Copia tutte le note";},3000); }
+  catch(_){ setBanner("Copia non riuscita: tieni premuto sul testo qui sotto e copia."); const pre=document.getElementById("exportBox"); if(pre){ pre.textContent=txt; pre.hidden=false; } }
 }
 function saveNote(id){
   const ta = document.getElementById("n-"+id); if(!ta) return;
