@@ -232,10 +232,10 @@ function cardHTML(e, now){
       <div class="erow"><button class="btn solid" type="submit">Salva</button><button class="btn" type="button" data-clear="${e.id}">Senza orario</button><button class="btn ghost" type="button" data-edit="${e.id}">Annulla</button><button class="btn del" type="button" data-del="${e.id}">${armDel===e.id?"Conferma elimina":"Elimina"}</button></div>
     </form>` : "";
   const draft = getDraft(e.id);
-  const noteOpen = e.done || openNote.has(e.id);
+  const noteOpen = openNote.has(e.id);
   const notes = noteOpen ? `<div class="notes">
       <textarea id="n-${e.id}" data-note="${e.id}" rows="3" placeholder="Note e cose da fare…" ${dis}>${esc(draft!=null?draft:(e.notes||""))}</textarea>
-      <div class="erow">${dict||window.webkitSpeechRecognition||window.SpeechRecognition?`<button class="btn mic" type="button" data-mic="${e.id}" ${dis}>🎤 Detta</button>`:""}<button class="btn solid" type="button" data-savenote="${e.id}" ${dis}>Salva nota</button>${draft!=null && draft!==(e.notes||"")?`<span class="unsaved">non salvata</span>`:""}</div>
+      <div class="erow">${dict||window.webkitSpeechRecognition||window.SpeechRecognition?`<button class="btn mic" type="button" data-mic="${e.id}" ${dis}>🎤 Detta</button>`:""}<button class="btn solid" type="button" data-savenote="${e.id}" ${dis}>Salva nota</button><button class="btn ghost" type="button" data-closenote="${e.id}">Chiudi</button>${draft!=null && draft!==(e.notes||"")?`<span class="unsaved">non salvata</span>`:""}</div>
     </div>` : (e.notes ? `<div class="saved-note">${esc(e.notes)}</div>` : "");
   return `<article class="ev ${st}" id="card-${e.id}">
     ${time}
@@ -248,7 +248,7 @@ function cardHTML(e, now){
       ${edit}
       <div class="row">
         <button class="btn ${e.done?"on":""}" type="button" data-done="${e.id}" ${dis}>${e.done?"✓ Fatto":"Segna fatto"}</button>
-        ${!e.done && !openNote.has(e.id)?`<button class="btn ghost" type="button" data-opennote="${e.id}" ${dis}>Nota</button>`:""}
+        ${!openNote.has(e.id)?`<button class="btn ghost" type="button" data-opennote="${e.id}" ${dis}>${e.notes?"Modifica nota":"+ Nota"}</button>`:""}
       </div>
       ${notes}
     </div>
@@ -341,7 +341,7 @@ document.addEventListener("click", evt=>{
   const t = evt.target.closest("button");
   if(!t || t.disabled) return;
   const d = t.dataset;
-  if(d.done){ const e=ev(d.done); e.done=!e.done; touch(e); commit(); return; }
+  if(d.done){ const e=ev(d.done); e.done=!e.done; if(e.done && !e.notes) openNote.add(e.id); else openNote.delete(e.id); touch(e); commit(); return; }
   if(d.who){ const e=ev(d.id); const s=new Set(e.who||[]); s.has(d.who)?s.delete(d.who):s.add(d.who); e.who=PEOPLE[20].filter(p=>s.has(p)); touch(e); commit(); return; }
   if(d.edit){ openEdit.has(d.edit)?openEdit.delete(d.edit):openEdit.add(d.edit); render(); return; }
   if(d.setday){ editDay[d.id]= d.setday==="wait" ? "wait" : +d.setday; render(); return; }
@@ -351,6 +351,7 @@ document.addEventListener("click", evt=>{
   if(d.clear){ const e=ev(d.clear); if(!applyDay(e)) return; e.start=null; e.end=null; openEdit.delete(e.id); touch(e); commit(); return; }
   if(d.opennote){ openNote.add(d.opennote); render(); const ta=document.getElementById("n-"+d.opennote); if(ta) ta.focus(); return; }
   if(d.savenote){ saveNote(d.savenote); return; }
+  if(d.closenote){ const ta=document.getElementById("n-"+d.closenote); if(ta) ta.blur(); openNote.delete(d.closenote); render(); return; }
   if(d.mic){ toggleMic(d.mic, t); return; }
   if(d.copyall){ copyAll(t); return; }
 });
@@ -421,7 +422,7 @@ async function copyAll(btn){
 function saveNote(id){
   const ta = document.getElementById("n-"+id); if(!ta) return;
   const e = ev(id); e.notes = ta.value.trim(); touch(e); setDraft(id, null); openNote.delete(id);
-  ta.blur(); commit(true);
+  ta.blur(); setBanner("✓ Nota salvata"); setTimeout(()=>{ const b=document.getElementById("banner"); if(b && b.textContent==="✓ Nota salvata") setBanner(""); }, 2000); commit(true);
 }
 
 // ---------- dettatura ----------
