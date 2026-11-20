@@ -193,6 +193,7 @@ const endOf = e => e.end ? at(e.day,e.end) : new Date(startOf(e).getTime()+30*60
 const fmt = d => d.toLocaleTimeString("it-IT",{hour:"2-digit",minute:"2-digit",timeZone:"Europe/Rome"});
 const esc = s => String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const ev = id => STATE.events.find(e=>e.id===id);
+const VIS = () => STATE.events.filter(e=>!e.deleted);
 const whoOf = e => e.day===19 ? PEOPLE[19] : (e.who||[]);
 const canEdit = () => MODE==="shared" || MODE==="local";
 
@@ -207,7 +208,7 @@ function status(e, now){
 }
 function overlaps(e){
   if(!e.day || !e.start || e.done) return [];
-  return STATE.events.filter(o=>o!==e && o.day===e.day && o.start && !o.done && startOf(o)<endOf(e) && startOf(e)<endOf(o)).map(o=>o.name.split(" – ")[0]);
+  return VIS().filter(o=>o!==e && o.day===e.day && o.start && !o.done && startOf(o)<endOf(e) && startOf(e)<endOf(o)).map(o=>o.name.split(" – ")[0]);
 }
 
 // ---------- vista ----------
@@ -255,7 +256,7 @@ function cardHTML(e, now){
 }
 
 function dayHTML(d, now){
-  const list = STATE.events.filter(e=>e.day===d);
+  const list = VIS().filter(e=>e.day===d);
   const timed = list.filter(e=>e.start).sort((a,b)=>startOf(a)-startOf(b));
   const tbd = list.filter(e=>!e.start);
   return timed.map(e=>cardHTML(e,now)).join("") + (tbd.length?`<div class="sep">Da fissare</div>`+tbd.map(e=>cardHTML(e,now)).join(""):"");
@@ -288,14 +289,14 @@ function render(){
   if(a && (a.tagName==="TEXTAREA" || a.tagName==="INPUT")){ renderNow(now); return; }
   [19,20].forEach(d=>{ document.getElementById("day-"+d).innerHTML = dayHTML(d, now); });
   document.getElementById("add").innerHTML = addHTML();
-  document.getElementById("day-wait").innerHTML = STATE.events.filter(e=>!e.day).map(e=>cardHTML(e,now)).join("");
+  document.getElementById("day-wait").innerHTML = VIS().filter(e=>!e.day).map(e=>cardHTML(e,now)).join("");
   renderNow(now);
-  document.getElementById("mode").textContent = MODE==="local" ? "Modifiche salvate solo su questo telefono." : MODE==="readonly" ? "Solo lettura." : "";
+  document.getElementById("mode").textContent = MODE==="local" ? (SB_ON ? syncLabel() : "Modifiche salvate solo su questo telefono.") : MODE==="readonly" ? "Solo lettura." : "";
 }
 function renderNow(now){
   const box=document.getElementById("now"), lbl=document.getElementById("nowLbl"), what=document.getElementById("nowWhat"), when=document.getElementById("nowWhen");
   box.className="now";
-  const timed = STATE.events.filter(e=>e.start && !e.done);
+  const timed = VIS().filter(e=>e.start && !e.done);
   const live = timed.find(e=>status(e,now)==="live");
   const nxt = timed.filter(e=>startOf(e)>now).sort((a,b)=>startOf(a)-startOf(b))[0];
   const w = e => whoOf(e).length ? " · "+whoOf(e).join(", ") : "";
@@ -319,7 +320,7 @@ function buildDoc(){
   return `<!DOCTYPE html>\n<html lang="it">\n<head>${HEAD_SRC}<style>${STYLE_SRC}</style>\n</head>\n<body>\n<script type="application/json" id="state">${json}<\/script>\n<script>${SELF_SRC}<\/script>\n</body>\n</html>\n`;
 }
 function commit(now){
-  if(MODE==="local"){ saveLocal(); render(); return; }
+  if(MODE==="local"){ saveLocal(); render(); if(SB_ON) schedulePush(); return; }
   if(MODE!=="shared") return;
   render(); setBanner("Salvataggio…");
   clearTimeout(publishTimer);
@@ -340,14 +341,14 @@ document.addEventListener("click", evt=>{
   const t = evt.target.closest("button");
   if(!t || t.disabled) return;
   const d = t.dataset;
-  if(d.done){ const e=ev(d.done); e.done=!e.done; commit(); return; }
-  if(d.who){ const e=ev(d.id); const s=new Set(e.who||[]); s.has(d.who)?s.delete(d.who):s.add(d.who); e.who=PEOPLE[20].filter(p=>s.has(p)); commit(); return; }
+  if(d.done){ const e=ev(d.done); e.done=!e.done; touch(e); commit(); return; }
+  if(d.who){ const e=ev(d.id); const s=new Set(e.who||[]); s.has(d.who)?s.delete(d.who):s.add(d.who); e.who=PEOPLE[20].filter(p=>s.has(p)); touch(e); commit(); return; }
   if(d.edit){ openEdit.has(d.edit)?openEdit.delete(d.edit):openEdit.add(d.edit); render(); return; }
   if(d.setday){ editDay[d.id]= d.setday==="wait" ? "wait" : +d.setday; render(); return; }
-  if(d.del){ if(armDel!==d.del){ armDel=d.del; render(); return; } STATE.events=STATE.events.filter(x=>x.id!==d.del); armDel=null; openEdit.delete(d.del); commit(); return; }
+  if(d.del){ if(armDel!==d.del){ armDel=d.del; render(); return; } { const e=ev(d.del); e.deleted=true; touch(e); } armDel=null; openEdit.delete(d.del); commit(); return; }
   if(d.add){ addOpen=!addOpen; render(); if(addOpen){ const n=document.getElementById("add-name"); if(n) n.focus(); } return; }
   if(d.addday){ addDay = d.addday==="wait" ? "wait" : +d.addday; const keep=collectAdd(); render(); restoreAdd(keep); return; }
-  if(d.clear){ const e=ev(d.clear); if(!applyDay(e)) return; e.start=null; e.end=null; openEdit.delete(e.id); commit(); return; }
+  if(d.clear){ const e=ev(d.clear); if(!applyDay(e)) return; e.start=null; e.end=null; openEdit.delete(e.id); touch(e); commit(); return; }
   if(d.opennote){ openNote.add(d.opennote); render(); const ta=document.getElementById("n-"+d.opennote); if(ta) ta.focus(); return; }
   if(d.savenote){ saveNote(d.savenote); return; }
   if(d.mic){ toggleMic(d.mic, t); return; }
@@ -360,7 +361,8 @@ document.addEventListener("submit", evt=>{
     if(!name.trim()){ setBanner("Scrivi chi o cosa."); return; }
     if(en && s && en<=s){ setBanner("L'orario di fine deve essere dopo l'inizio."); return; }
     const day = addDay==="wait" ? null : addDay;
-    STATE.events.push({id:"m"+Date.now().toString(36), name:name.trim(), day, start: day&&s?s:null, end: day&&s&&en?en:null, type:"", note:note.trim(), who:[], done:false, notes:"", phone:""});
+    STATE.events.push({ts:Date.now(), id:"m"+Date.now().toString(36)+Math.random().toString(36).slice(2,5), name:name.trim(), day, start: day&&s?s:null, end: day&&s&&en?en:null, type:"", note:note.trim(), who:[], done:false, notes:"", phone:""});
+    touch(STATE.events[STATE.events.length-1]);
     addOpen=false; setBanner(""); document.activeElement && document.activeElement.blur(); commit(); return;
   }
   const f = evt.target.closest("[data-form]"); if(!f) return;
@@ -370,7 +372,7 @@ document.addEventListener("submit", evt=>{
   if(!s){ setBanner("Metti almeno l'orario di inizio, oppure tocca \"Senza orario\"."); return; }
   if(en && en<=s){ setBanner("L'orario di fine deve essere dopo l'inizio."); return; }
   if(!applyDay(e)) return;
-  e.start=s; e.end=en||null; openEdit.delete(e.id); setBanner(""); document.activeElement && document.activeElement.blur(); commit();
+  e.start=s; e.end=en||null; openEdit.delete(e.id); setBanner(""); touch(e); document.activeElement && document.activeElement.blur(); commit();
 });
 document.addEventListener("input", evt=>{
   const ta = evt.target.closest("[data-note]"); if(ta) setDraft(ta.dataset.note, ta.value);
@@ -399,7 +401,7 @@ function addHTML(){
 }
 function exportText(){
   const order = e => (e.day||99)*10000 + (e.start ? +e.start.replace(":","") : 9999);
-  const list = [...STATE.events].sort((a,b)=>order(a)-order(b));
+  const list = VIS().sort((a,b)=>order(a)-order(b));
   const out = ["AGENDA LINECHECK – note ("+new Date().toLocaleString("it-IT",{timeZone:"Europe/Rome"})+")",""];
   list.forEach(e=>{
     const draft = getDraft(e.id);
@@ -418,7 +420,7 @@ async function copyAll(btn){
 }
 function saveNote(id){
   const ta = document.getElementById("n-"+id); if(!ta) return;
-  const e = ev(id); e.notes = ta.value.trim(); setDraft(id, null); openNote.delete(id);
+  const e = ev(id); e.notes = ta.value.trim(); touch(e); setDraft(id, null); openNote.delete(id);
   ta.blur(); commit(true);
 }
 
@@ -444,11 +446,87 @@ function toggleMic(id, btn){
   try{ rec.start(); btn.textContent="■ Stop"; }catch(_){ rec=null; }
 }
 
+// ---------- sincronizzazione Supabase (versione GitHub) ----------
+const SB_URL = "https://qqkrauxzbnharerkiaxc.supabase.co";
+const SB_KEY = "sb_publishable_yOuU5zf5hnMy-ae70hQktw_jZOlFoMW";
+let SB_ON = false, lastSync = 0, syncErr = false, pushTimer = null, pulling = false;
+let pending = new Set();
+try{ pending = new Set(JSON.parse(localStorage.getItem("lc26-pending")||"[]")); }catch(_){}
+const savePending = () => { try{ localStorage.setItem("lc26-pending", JSON.stringify([...pending])); }catch(_){} };
+function touch(e){ e.ts = Date.now(); pending.add(e.id); savePending(); }
+function syncLabel(){
+  if(syncErr) return "Senza rete: modifiche salvate sul telefono, le invio appena torna la connessione.";
+  if(!lastSync) return "Sincronizzazione…";
+  return "Sincronizzato con tutti alle "+new Date(lastSync).toLocaleTimeString("it-IT",{hour:"2-digit",minute:"2-digit",timeZone:"Europe/Rome"})+(pending.size?" · "+pending.size+" in invio":"");
+}
+function sbFetch(path, opts){
+  opts = opts||{};
+  return fetch(SB_URL+"/rest/v1/"+path, Object.assign({}, opts, {headers:Object.assign(SB_KEY.indexOf("sb_")===0 ? {apikey:SB_KEY, "Content-Type":"application/json"} : {apikey:SB_KEY, Authorization:"Bearer "+SB_KEY, "Content-Type":"application/json"}, opts.headers||{})}));
+}
+function schedulePush(){ clearTimeout(pushTimer); pushTimer = setTimeout(pushPending, 250); }
+async function pushPending(){
+  if(!pending.size) return;
+  const ids = [...pending];
+  const sent = {};
+  const rows = ids.map(id=>ev(id)).filter(Boolean).map(e=>{ sent[e.id]=e.ts||0; return {id:e.id, data:JSON.parse(JSON.stringify(e)), updated_at:new Date().toISOString()}; });
+  try{
+    const r = await sbFetch("lc_agenda?on_conflict=id", {method:"POST", headers:{Prefer:"resolution=merge-duplicates,return=minimal"}, body:JSON.stringify(rows)});
+    if(!r.ok) throw new Error("push "+r.status);
+    ids.forEach(id=>{ const e=ev(id); if(!e || (e.ts||0) === sent[id]) pending.delete(id); });
+    savePending(); syncErr=false; lastSync=Date.now();
+  }catch(_){ syncErr=true; }
+  render();
+}
+function mergeLegacy(local, remote){
+  // note e "fatto" scritti sui telefoni prima della sincronizzazione: non si perdono
+  const m = Object.assign({}, remote);
+  m.done = !!(remote.done || local.done);
+  const ln = (local.notes||"").trim(), rn = (remote.notes||"").trim();
+  m.notes = !ln || rn.includes(ln) ? rn : (rn ? rn+"\n"+ln : ln);
+  m.who = PEOPLE[20].filter(p=>(remote.who||[]).includes(p) || (local.who||[]).includes(p));
+  if(remote.day===20 && !m.who.length) m.who = local.who||[];
+  return m;
+}
+async function pull(){
+  if(pulling) return; pulling = true;
+  try{
+    const r = await sbFetch("lc_agenda?select=id,data");
+    if(!r.ok) throw new Error("pull "+r.status);
+    const rows = await r.json();
+    let migrated = false; try{ migrated = localStorage.getItem("lc26-migrated")==="1"; }catch(_){}
+    const remote = Object.fromEntries(rows.map(x=>[x.id, x.data]));
+    STATE.events.forEach((e,i)=>{
+      const rd = remote[e.id];
+      if(!rd){ pending.add(e.id); return; }
+      if(!migrated && !e.ts){
+        const m = mergeLegacy(e, rd);
+        const changed = m.done!==!!rd.done || (m.notes||"")!==(rd.notes||"") || JSON.stringify(m.who||[])!==JSON.stringify(rd.who||[]);
+        STATE.events[i] = m; if(changed){ m.ts = Math.max(Date.now(), (rd.ts||0)+1); pending.add(e.id); }
+        return;
+      }
+      if((rd.ts||0) > (e.ts||0)) STATE.events[i] = rd;
+      else if((e.ts||0) > (rd.ts||0)) pending.add(e.id);
+    });
+    rows.forEach(x=>{ if(!ev(x.id)) STATE.events.push(x.data); });
+    try{ localStorage.setItem("lc26-migrated","1"); }catch(_){}
+    savePending(); saveLocal(); syncErr=false; lastSync=Date.now();
+  }catch(_){ syncErr=true; }
+  pulling = false;
+  render();
+  if(pending.size) pushPending();
+}
+
 // ---------- avvio ----------
 shell();
-if(!(window.claude && typeof window.claude.use==="function")){ MODE="local"; loadLocal(); }
+if(!(window.claude && typeof window.claude.use==="function")){ MODE="local"; loadLocal(); SB_ON = !!SB_KEY && SB_KEY.indexOf("__")!==0 && typeof fetch==="function"; }
 render();
 setInterval(render, 30000);
+if(SB_ON){
+  pull();
+  setInterval(pull, 12000);
+  document.addEventListener("visibilitychange", ()=>{ if(document.visibilityState==="visible") pull(); });
+  window.addEventListener("online", pull);
+}
 if(MODE!=="local"){
   window.claude.use("artifact").then(a=>{ artifactApi=a; MODE = a ? "shared" : "readonly"; render(); }).catch(()=>{ MODE="readonly"; render(); });
   window.claude.use("dictation").then(d=>{
